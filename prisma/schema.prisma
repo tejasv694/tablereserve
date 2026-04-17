@@ -1,0 +1,164 @@
+// Restaurant Booking Platform — Prisma Schema
+// Copy this file to /prisma/schema.prisma in your project
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// RESTAURANT (one per database / tenant)
+// ─────────────────────────────────────────────
+model Restaurant {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique // used in URL: /{slug}/book
+  email        String   // owner email — for CSV exports and notifications
+  phone        String?
+  address      String?
+  timezone     String   @default("Europe/Berlin")
+  locale       String   @default("de") // de, en, hi
+  currency     String   @default("EUR")
+
+  // Operating hours stored as JSON
+  // Format: { "monday": { "open": "12:00", "close": "22:00" }, ... }
+  operatingHours Json?
+
+  // Booking config
+  slotDurationMinutes  Int @default(120) // 2 hours
+  bufferMinutes        Int @default(25)  // 25 min turnover buffer
+  slotIntervalMinutes  Int @default(30)  // show slots every 30 min
+  maxPartySize         Int @default(12)
+  advanceBookingDays   Int @default(60)  // how far ahead customers can book
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tables       Table[]
+  bookings     Booking[]
+  staffMembers StaffMember[]
+}
+
+// ─────────────────────────────────────────────
+// TABLE
+// ─────────────────────────────────────────────
+model Table {
+  id            String     @id @default(cuid())
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId  String
+
+  label         String     // e.g. "Table 4", "Window Seat A"
+  capacity      Int        // max number of guests
+  minCapacity   Int        @default(1)
+  section       String?    // e.g. "Terrace", "Main Hall", "Bar Area"
+  isActive      Boolean    @default(true)
+  isOnline      Boolean    @default(true) // show on public booking page
+
+  // Optional: position on table map (for visual layout)
+  positionX     Int?
+  positionY     Int?
+
+  // Waiter assigned to this table (optional)
+  waiterName    String?
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  bookings      Booking[]
+
+  @@index([restaurantId])
+}
+
+// ─────────────────────────────────────────────
+// BOOKING
+// ─────────────────────────────────────────────
+model Booking {
+  id            String        @id @default(cuid())
+  restaurant    Restaurant    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId  String
+  table         Table         @relation(fields: [tableId], references: [id])
+  tableId       String
+
+  // ⚠️  PII FIELDS — AES-256-GCM encrypted before storing, decrypt on read
+  // Store as encrypted base64 strings. Never store plain text.
+  customerName  String        // encrypted
+  customerEmail String        // encrypted
+  customerPhone String?       // encrypted (optional)
+
+  partySize     Int
+  specialRequests String?     // NOT encrypted — keep non-PII
+
+  // Time fields — always stored in UTC
+  startTime     DateTime      // booking start (UTC)
+  endTime       DateTime      // startTime + slotDurationMinutes (UTC)
+  availableFrom DateTime      // startTime + slotDurationMinutes + bufferMinutes (UTC)
+                              // next booking cannot start before this
+
+  status        BookingStatus @default(CONFIRMED)
+
+  // GDPR consent — mandatory for EU customers
+  gdprConsent   Boolean       @default(false)
+  consentAt     DateTime?     // when they checked the box
+
+  // Booking source
+  source        BookingSource @default(ONLINE)
+
+  // Internal notes (restaurant staff only, not shown to customer)
+  staffNotes    String?
+
+  // Soft delete — set before hard delete in cleanup job
+  deletedAt     DateTime?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([restaurantId, startTime])
+  @@index([tableId, startTime])
+  @@index([restaurantId, status])
+}
+
+enum BookingStatus {
+  CONFIRMED    // Active booking
+  CANCELLED    // Cancelled by customer or restaurant
+  COMPLETED    // Guest has left
+  NO_SHOW      // Guest did not arrive
+  PENDING      // Awaiting confirmation (if manual approval enabled)
+}
+
+enum BookingSource {
+  ONLINE       // Booked via public booking page
+  PHONE        // Added manually by staff (phone call)
+  WALKIN       // Walk-in added by staff
+  THIRD_PARTY  // From external platform (future: Google, OpenTable)
+}
+
+// ─────────────────────────────────────────────
+// STAFF MEMBER (restaurant employees who can log in)
+// ─────────────────────────────────────────────
+model StaffMember {
+  id            String     @id @default(cuid())
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId  String
+
+  name          String
+  email         String     @unique
+  passwordHash  String     // bcrypt hash
+  role          StaffRole  @default(STAFF)
+  isActive      Boolean    @default(true)
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@index([restaurantId])
+}
+
+enum StaffRole {
+  OWNER        // Full access including settings and data export
+  MANAGER      // Can manage bookings and tables
+  STAFF        // Can view and update booking status only
+}
