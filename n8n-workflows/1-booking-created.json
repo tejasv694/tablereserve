@@ -1,0 +1,64 @@
+{
+  "name": "Booking Created — Email Customer + Notify Owner",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "booking-created",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "booking-created"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.restaurant.email }}",
+        "toEmail": "={{ $json.booking.customerEmail }}",
+        "subject": "=Booking received — {{ $json.restaurant.name }}",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;\">\n  <div style=\"text-align: center; margin-bottom: 30px;\">\n    <div style=\"display: inline-block; width: 60px; height: 60px; border-radius: 50%; background: #FFF7ED; line-height: 60px; font-size: 28px;\">🍽️</div>\n  </div>\n  <h1 style=\"text-align: center; color: #1a1a1a; font-size: 24px; margin-bottom: 8px;\">Booking Received!</h1>\n  <p style=\"text-align: center; color: #ea580c; font-weight: 600; margin-bottom: 30px;\">{{ $json.restaurant.name }} will confirm your reservation shortly.</p>\n  <div style=\"background: #FFFBF5; border: 1px solid #FED7AA; border-radius: 12px; padding: 24px; margin-bottom: 24px;\">\n    <table style=\"width: 100%; border-collapse: collapse;\">\n      <tr><td style=\"padding: 8px 0; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;\">Guest</td><td style=\"padding: 8px 0; font-weight: 600; text-align: right;\">{{ $json.booking.customerName }}</td></tr>\n      <tr><td style=\"padding: 8px 0; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;\">Date & Time</td><td style=\"padding: 8px 0; font-weight: 600; text-align: right;\">{{ $json.booking.startTime }}</td></tr>\n      <tr><td style=\"padding: 8px 0; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;\">Party Size</td><td style=\"padding: 8px 0; font-weight: 600; text-align: right;\">{{ $json.booking.partySize }} guests</td></tr>\n      <tr><td style=\"padding: 8px 0; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;\">Table</td><td style=\"padding: 8px 0; font-weight: 600; text-align: right;\">{{ $json.booking.table.label }} — {{ $json.booking.table.section }}</td></tr>\n      <tr><td style=\"padding: 8px 0; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;\">Reference</td><td style=\"padding: 8px 0; font-family: monospace; text-align: right;\">{{ $json.booking.id }}</td></tr>\n    </table>\n  </div>\n  {{ $json.booking.specialRequests ? '<p style=\"color: #666; font-size: 14px;\"><strong>Special Requests:</strong> ' + $json.booking.specialRequests + '</p>' : '' }}\n  <p style=\"color: #888; font-size: 13px; text-align: center; margin-top: 30px;\">You will receive a confirmation email once the restaurant approves your booking.</p>\n  <hr style=\"border: none; border-top: 1px solid #eee; margin: 24px 0;\">\n  <p style=\"color: #aaa; font-size: 11px; text-align: center;\">{{ $json.restaurant.name }} · {{ $json.restaurant.address }}<br>Your personal data will be automatically deleted 30 days after your visit.</p>\n</div>",
+        "options": {}
+      },
+      "id": "send-customer-email",
+      "name": "Email Customer",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "=noreply@yourdomain.com",
+        "toEmail": "={{ $json.restaurant.email }}",
+        "subject": "=🔔 New booking request — {{ $json.booking.customerName }}",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 30px 20px;\">\n  <h2 style=\"color: #1a1a1a;\">🔔 New Booking Request</h2>\n  <div style=\"background: #f9f9f9; border: 1px solid #e5e5e5; border-radius: 10px; padding: 20px; margin: 20px 0;\">\n    <p><strong>Customer:</strong> {{ $json.booking.customerName }}</p>\n    <p><strong>Email:</strong> {{ $json.booking.customerEmail }}</p>\n    <p><strong>Phone:</strong> {{ $json.booking.customerPhone || 'Not provided' }}</p>\n    <p><strong>Party Size:</strong> {{ $json.booking.partySize }} guests</p>\n    <p><strong>Date/Time:</strong> {{ $json.booking.startTime }}</p>\n    <p><strong>Table:</strong> {{ $json.booking.table.label }} ({{ $json.booking.table.section }})</p>\n    <p><strong>Status:</strong> <span style=\"color: #ea580c; font-weight: 600;\">PENDING — Awaiting your confirmation</span></p>\n    {{ $json.booking.specialRequests ? '<p><strong>Special Requests:</strong> ' + $json.booking.specialRequests + '</p>' : '' }}\n  </div>\n  <p><a href=\"https://yourdomain.com/dashboard\" style=\"display: inline-block; background: #ea580c; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;\">Open Dashboard to Confirm</a></p>\n</div>",
+        "options": {}
+      },
+      "id": "send-owner-email",
+      "name": "Email Owner",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [500, 420]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Email Customer", "type": "main", "index": 0 },
+          { "node": "Email Owner", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "booking" }]
+}

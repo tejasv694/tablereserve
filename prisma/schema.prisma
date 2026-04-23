@@ -7,8 +7,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL") // For migrations on serverless (Neon)
 }
 
 // ─────────────────────────────────────────────
@@ -42,6 +43,8 @@ model Restaurant {
   tables       Table[]
   bookings     Booking[]
   staffMembers StaffMember[]
+  shiftConfig  ShiftConfig?
+  shiftPlans   ShiftPlan[]
 }
 
 // ─────────────────────────────────────────────
@@ -105,6 +108,9 @@ model Booking {
   gdprConsent   Boolean       @default(false)
   consentAt     DateTime?     // when they checked the box
 
+  // Marketing consent — separate from GDPR, optional opt-in
+  marketingConsent Boolean    @default(false)
+
   // Booking source
   source        BookingSource @default(ONLINE)
 
@@ -124,6 +130,7 @@ model Booking {
 
 enum BookingStatus {
   CONFIRMED    // Active booking
+  SEATED       // Guest has been seated
   CANCELLED    // Cancelled by customer or restaurant
   COMPLETED    // Guest has left
   NO_SHOW      // Guest did not arrive
@@ -149,10 +156,20 @@ model StaffMember {
   email         String     @unique
   passwordHash  String     // bcrypt hash
   role          StaffRole  @default(STAFF)
+  department    StaffDepartment @default(FRONT)
   isActive      Boolean    @default(true)
+
+  // Shift management
+  phone         String?    // for WhatsApp/SMS notifications
+  contractType  ContractType @default(PART_TIME)
+  monthlyHoursTarget Int   @default(80) // 80 for part-time, 150 for full-time
+  availabilityToken  String? @unique // unique token for availability form link
 
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
+
+  availability  StaffAvailability[]
+  assignments   ShiftAssignment[]
 
   @@index([restaurantId])
 }
@@ -161,4 +178,149 @@ enum StaffRole {
   OWNER        // Full access including settings and data export
   MANAGER      // Can manage bookings and tables
   STAFF        // Can view and update booking status only
+}
+
+enum StaffDepartment {
+  KITCHEN      // Kitchen staff
+  FRONT        // Front-of-house / serving
+  DELIVERY     // Delivery drivers
+  MANAGER      // Floor manager
+}
+
+enum ContractType {
+  FULL_TIME    // ~150 hours/month
+  PART_TIME    // ~80 hours/month
+  MINI_JOB     // 520 EUR basis (Germany)
+}
+
+// ─────────────────────────────────────────────
+// SHIFT CONFIG (restaurant-level shift settings)
+// ─────────────────────────────────────────────
+model ShiftConfig {
+  id            String     @id @default(cuid())
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId  String     @unique
+
+  // Minimum staff requirements per day (JSON)
+  // Format: { "KITCHEN": 3, "FRONT": 4, "DELIVERY": 2, "MANAGER": 1 }
+  minStaffPerRole Json     @default("{\"KITCHEN\": 2, \"FRONT\": 3, \"DELIVERY\": 1, \"MANAGER\": 1}")
+  minTotalStaff   Int      @default(7)
+
+  // Shift timing mode
+  shiftMode     ShiftMode  @default(CONSTANT)
+
+  // Defined shift slots (JSON array)
+  // Format: [{ "name": "Morning", "start": "08:00", "end": "14:00" }, ...]
+  shiftSlots    Json       @default("[{\"name\": \"Morning\", \"start\": \"08:00\", \"end\": \"16:00\"}, {\"name\": \"Evening\", \"start\": \"14:00\", \"end\": \"22:00\"}]")
+
+  // Availability collection settings
+  availabilityDeadlineDay DayOfWeek @default(WEDNESDAY) // staff must submit by this day
+  planReleaseDay          DayOfWeek @default(THURSDAY)   // shift plan released on this day
+  planReleaseTime         String    @default("00:05")    // time of release (HH:mm)
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+enum ShiftMode {
+  CONSTANT     // Same shift times each week, only days change per staff request
+  SHUFFLE      // Staff rotate between different shift times weekly
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ─────────────────────────────────────────────
+// STAFF AVAILABILITY (weekly submission)
+// ─────────────────────────────────────────────
+model StaffAvailability {
+  id            String      @id @default(cuid())
+  staff         StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  staffMemberId String
+
+  weekStartDate DateTime    // Monday of the target week (date only, no time)
+
+  // Available days as JSON array: ["MONDAY", "TUESDAY", "FRIDAY"]
+  availableDays Json
+
+  // Preferred shift (optional)
+  preferredShift String?    // "Morning", "Evening", or "Any"
+
+  notes         String?     // "Can only do morning on Friday"
+
+  submittedAt   DateTime    @default(now()) // for first-come-first-serve priority
+
+  @@unique([staffMemberId, weekStartDate])
+  @@index([weekStartDate])
+}
+
+// ─────────────────────────────────────────────
+// SHIFT PLAN (generated weekly plan)
+// ─────────────────────────────────────────────
+model ShiftPlan {
+  id            String         @id @default(cuid())
+  restaurant    Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId  String
+
+  weekStartDate DateTime       // Monday of the week
+  status        ShiftPlanStatus @default(DRAFT)
+
+  // If status is SHORTAGE, details of what's missing (JSON)
+  // Format: [{ "day": "FRIDAY", "role": "KITCHEN", "needed": 3, "assigned": 1 }]
+  shortageDetails Json?
+
+  generatedAt   DateTime       @default(now())
+  releasedAt    DateTime?      // when the plan was sent to staff
+
+  assignments   ShiftAssignment[]
+
+  @@unique([restaurantId, weekStartDate])
+  @@index([restaurantId, weekStartDate])
+}
+
+enum ShiftPlanStatus {
+  DRAFT        // Plan generated but not reviewed
+  SHORTAGE     // Plan has gaps — owner must resolve
+  RELEASED     // Approved and sent to staff
+  OVERRIDDEN   // Owner manually modified the plan
+}
+
+// ─────────────────────────────────────────────
+// SHIFT ASSIGNMENT (individual shift for one person on one day)
+// ─────────────────────────────────────────────
+model ShiftAssignment {
+  id            String      @id @default(cuid())
+  shiftPlan     ShiftPlan   @relation(fields: [shiftPlanId], references: [id], onDelete: Cascade)
+  shiftPlanId   String
+  staff         StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  staffMemberId String
+
+  date          DateTime    // the specific day
+  shiftName     String      // "Morning", "Evening", etc.
+  shiftStart    String      // "08:00"
+  shiftEnd      String      // "16:00"
+  role          StaffDepartment // KITCHEN, FRONT, DELIVERY, MANAGER
+  hours         Float       // calculated hours for this shift
+
+  status        AssignmentStatus @default(SCHEDULED)
+  isOverride    Boolean     @default(false) // true if owner manually placed this
+
+  createdAt     DateTime    @default(now())
+
+  @@index([shiftPlanId])
+  @@index([staffMemberId])
+  @@index([date])
+}
+
+enum AssignmentStatus {
+  SCHEDULED    // Normal planned shift
+  COMPLETED    // Shift was worked
+  CANCELLED    // Shift cancelled (e.g. sick leave resolved)
 }

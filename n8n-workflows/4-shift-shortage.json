@@ -1,0 +1,61 @@
+{
+  "name": "Shift Shortage Alert — Notify Owner",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "shift-shortage",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "shift-shortage"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst shortages = data.shortageDetails || [];\nconst restaurant = data.restaurant;\nconst week = data.shiftPlan.weekStartDate;\n\nconst rows = shortages.map(s => \n  `<tr><td style=\"padding:8px 12px;border-bottom:1px solid #fecaca;\">${s.day}</td><td style=\"padding:8px 12px;border-bottom:1px solid #fecaca;\">${s.shift}</td><td style=\"padding:8px 12px;border-bottom:1px solid #fecaca;\">${s.role}</td><td style=\"padding:8px 12px;border-bottom:1px solid #fecaca;font-weight:600;color:#dc2626;\">${s.assigned}/${s.needed} (${s.gap} missing)</td></tr>`\n).join('');\n\nconst totalGap = shortages.reduce((sum, s) => sum + (s.gap || 0), 0);\n\nconst html = `<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;margin:0 auto;padding:30px 20px;\">\n  <h2 style=\"color:#dc2626;\">⚠️ Staff Shortage Alert</h2>\n  <p>The shift plan for <strong>week of ${week}</strong> has <strong>${totalGap} unfilled positions</strong>:</p>\n  <table style=\"width:100%;border-collapse:collapse;margin:20px 0;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;\">\n    <tr style=\"background:#FEE2E2;\"><th style=\"padding:10px 12px;text-align:left;\">Day</th><th style=\"padding:10px 12px;text-align:left;\">Shift</th><th style=\"padding:10px 12px;text-align:left;\">Role</th><th style=\"padding:10px 12px;text-align:left;\">Status</th></tr>\n    ${rows}\n  </table>\n  <p>Please find additional staff or adjust the schedule.</p>\n  <p><a href=\"https://yourdomain.com/dashboard/shifts\" style=\"display:inline-block;background:#dc2626;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;\">Open Shift Planner</a></p>\n</div>`;\n\nconst plainText = shortages.map(s => `⚠️ ${s.day} ${s.shift}: Need ${s.needed} ${s.role}, only ${s.assigned} assigned (${s.gap} missing)`).join('\\n');\n\nreturn [{ json: { html, plainText, totalGap, restaurant, week } }];"
+      },
+      "id": "format-shortage",
+      "name": "Format Shortage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "=noreply@yourdomain.com",
+        "toEmail": "={{ $json.restaurant.email }}",
+        "subject": "=⚠️ Staff shortage — {{ $json.totalGap }} positions unfilled for week of {{ $json.week }}",
+        "emailType": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "send-owner-email",
+      "name": "Email Owner",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Format Shortage", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Shortage": {
+      "main": [
+        [{ "node": "Email Owner", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "shifts" }]
+}

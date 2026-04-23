@@ -1,0 +1,51 @@
+// Master database schema — platform-level data
+// Separate from per-restaurant tenant databases
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/master-prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("MASTER_DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// RESTAURANT ACCOUNT (one per onboarded restaurant)
+// ─────────────────────────────────────────────
+model RestaurantAccount {
+  id          String              @id @default(cuid())
+  name        String
+  slug        String              @unique
+  ownerEmail  String
+  ownerName   String
+  plan        RestaurantPlan      @default(TRIAL)
+  status      RestaurantStatus    @default(ACTIVE)
+  databaseUrl String              // full postgres connection URL for this tenant
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+enum RestaurantPlan {
+  TRIAL
+  BASIC
+  PRO
+}
+
+enum RestaurantStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+// ─────────────────────────────────────────────
+// PLATFORM ADMIN (super admins who manage the platform)
+// ─────────────────────────────────────────────
+model PlatformAdmin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   // bcrypt hash
+  name         String
+  createdAt    DateTime @default(now())
+}

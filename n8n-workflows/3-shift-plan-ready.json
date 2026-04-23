@@ -1,0 +1,61 @@
+{
+  "name": "Shift Plan Ready — Email Staff Schedules",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "shift-plan-ready",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "shift-plan-ready"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Group assignments by staff email and build schedule summary\nconst data = $input.first().json;\nconst assignments = data.assignments || [];\nconst restaurant = data.restaurant;\nconst weekStart = data.shiftPlan.weekStartDate;\n\n// Group by staff\nconst byStaff = {};\nfor (const a of assignments) {\n  const key = a.staffEmail || a.staffName || a.staffMemberId;\n  if (!byStaff[key]) {\n    byStaff[key] = {\n      staffName: a.staffName || 'Staff',\n      staffEmail: a.staffEmail || '',\n      shifts: []\n    };\n  }\n  byStaff[key].shifts.push({\n    day: a.day || a.date,\n    shiftName: a.shiftName,\n    start: a.shiftStart,\n    end: a.shiftEnd,\n    role: a.role,\n    hours: a.hours\n  });\n}\n\n// Build output items — one per staff member\nconst items = Object.values(byStaff).map(staff => {\n  const shiftLines = staff.shifts.map(s => \n    `<tr><td style=\"padding:6px 12px;border-bottom:1px solid #eee;\">${s.day}</td><td style=\"padding:6px 12px;border-bottom:1px solid #eee;\">${s.shiftName}</td><td style=\"padding:6px 12px;border-bottom:1px solid #eee;\">${s.start} — ${s.end}</td><td style=\"padding:6px 12px;border-bottom:1px solid #eee;\">${s.hours}h</td></tr>`\n  ).join('');\n  \n  const totalHours = staff.shifts.reduce((sum, s) => sum + (s.hours || 0), 0);\n  \n  const html = `<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;margin:0 auto;padding:30px 20px;\">\n    <h2>📅 Your Shift Schedule</h2>\n    <p>Hi ${staff.staffName}, here is your schedule for the week of ${weekStart}:</p>\n    <table style=\"width:100%;border-collapse:collapse;margin:20px 0;\">\n      <tr style=\"background:#f9f9f9;\"><th style=\"padding:8px 12px;text-align:left;\">Day</th><th style=\"padding:8px 12px;text-align:left;\">Shift</th><th style=\"padding:8px 12px;text-align:left;\">Time</th><th style=\"padding:8px 12px;text-align:left;\">Hours</th></tr>\n      ${shiftLines}\n    </table>\n    <p><strong>Total hours this week:</strong> ${totalHours}h</p>\n    <hr style=\"border:none;border-top:1px solid #eee;margin:24px 0;\">\n    <p style=\"color:#aaa;font-size:11px;\">${restaurant.name}</p>\n  </div>`;\n  \n  return {\n    json: {\n      staffName: staff.staffName,\n      staffEmail: staff.staffEmail,\n      subject: `📅 Your shifts for week of ${weekStart} — ${restaurant.name}`,\n      html,\n      restaurant\n    }\n  };\n});\n\nreturn items;"
+      },
+      "id": "build-emails",
+      "name": "Build Staff Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "=noreply@yourdomain.com",
+        "toEmail": "={{ $json.staffEmail }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "send-staff-email",
+      "name": "Email Staff",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Build Staff Emails", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Staff Emails": {
+      "main": [
+        [{ "node": "Email Staff", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "shifts" }]
+}
