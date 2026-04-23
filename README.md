@@ -2,6 +2,14 @@
 
 A restaurant booking and staff management platform. Restaurants get their own booking page where customers can reserve tables online. Staff manage bookings from a dashboard, and managers handle shift planning weekly.
 
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?logo=tailwindcss&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Prisma-4169E1?logo=postgresql&logoColor=white)
+![NextAuth](https://img.shields.io/badge/Auth-NextAuth.js-purple)
+![n8n](https://img.shields.io/badge/Automation-n8n-EA4B71?logo=n8n&logoColor=white)
+![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel&logoColor=white)
+
 ---
 
 ## Features
